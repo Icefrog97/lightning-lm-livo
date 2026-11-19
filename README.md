@@ -1,8 +1,5 @@
 ## 使用说明：
 
-1. 将 MAP/ 下的 example_* 复制并重命名为 *。
-2. 安装依赖
-
 本仓库在 [lightning-lm](https://github.com/gaoxiang12/lightning-lm) 的激光建图与定位上继续开发。前端仍是 FasterLIO / ESKF，定位仍是激光匹配加 PGO。
 
 用到的项目：
@@ -82,6 +79,9 @@ Ubuntu 22.04，ROS 2 Humble。
 
 ### 依赖
 
+1. 将 MAP/ 下的 example_* 复制并重命名为 *。
+2. 安装依赖
+
 - PCL、Eigen、Ceres、yaml-cpp、glog、geographiclib、OpenCV、gflags、pcl_conversions、OpenMP
 - CUDA 可选。没有 CUDA 时 3D-BBS 用 CPU，动态物剔除不走 TensorRT
 
@@ -142,18 +142,12 @@ make install
 **vikit 与 CUDA**
 
 - vikit 编在 `src/vikit_common/`，目标 `vikit_plugin`
-- CUDA 自己装。不装也能编译，3D-BBS 走 CPU
-- 装了 CUDA 但不想编 GPU 库时，在下面的 colcon 命令里加上 `-DWITH_CUDA=OFF`
+- CUDA >= 12.0 自己装。不装也能编译，3D-BBS 走 CPU
 
 ### 编译工程
 
-在工作空间根目录执行。这个仓库的工作空间根目录是源码包的上一级，例如 `/home/abc/lyx/lightning-lm2`，不是 `src/lightning-lm2`。在源码包里面执行的话，`log/` 和 `install/` 会写进源码目录。
-
-`MAKEFLAGS="-j4"` 是编译时最多 4 个线程。
-
 ```bash
-source /opt/ros/humble/setup.bash
-MAKEFLAGS="-j4" colcon build --packages-select lightning --cmake-args -DCMAKE_BUILD_TYPE=Release
+colcon build
 source install/setup.bash
 ```
 
