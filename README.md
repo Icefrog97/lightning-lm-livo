@@ -18,29 +18,47 @@
 
 ### 建图前端可以三选一
 
-lightning-lm 的纯激光地图是 iVox。这里另外接了 FAST-LIVO2 的 VoxelMap。VoxelMap 不等于必须开相机。
+lightning-lm 的纯激光地图是 iVox。这里另外接了 FAST-LIVO2 的 VoxelMap。VoxelMap 可以单独当纯激光用。
 
-1. 纯激光，用原来的 iVox
+**1. 纯激光，用原来的 iVox**
 
-   `config/config_mid360.yaml` 里：
+- `visual/enable: false`
+- `lio/use_voxel_map: false`
+- 当前帧降采样：`common/filter_size_surf`
+- 往地图加点的体素门限：`common/filter_size_map`
 
-   - `visual/enable: false`
-   - `lio/use_voxel_map: false`
+**2. 纯激光，用 VoxelMap**
 
-   当前帧降采样用 `common/filter_size_surf`。往地图里加点的体素门限用 `common/filter_size_map`。
+- `visual/enable: false`
+- `lio/use_voxel_map: true`
+- 只吃雷达和 IMU
+- 地图按体素存平面，参数在 `lio:` 下：`voxel_size`、`max_layer`、`max_points_num`、`lru_capacity`
+- 当前帧降采样：`common/livo_filter_size_surf`，默认 0.4，对应 FAST-LIVO2 的 avia 配置
 
-2. 纯激光，用 VoxelMap，不用 iVox
+**3. 激光加视觉（LIVO）**
 
-   - `visual/enable: false`
-   - `lio/use_voxel_map: true`
+- `visual/enable: true`，同时强制 `use_voxel_map: true`
+- 图像话题：`common/image_topics`
+- 内外参：`camera`、`vio`
+- 相机模型在 `src/vikit_common/`，目标名 `vikit_plugin`
+- 每个视觉点最多保留 15 次观测
+- 法向更新足够小，且观测超过 7 次，就标成收敛
 
-   仍然只吃雷达和 IMU，不跑视觉更新。地图改成按体素存平面，参数在 `lio:` 下面，包括 `voxel_size`、`max_layer`、`max_points_num`、`lru_capacity`。`lru_capacity` 是根体素个数上限，写 `0` 表示不淘汰。当前帧降采样改用 `common/livo_filter_size_surf`，默认 0.4，对应 FAST-LIVO2 的 avia 配置。这一档用来单独看 VoxelMap 的激光里程计，不把视觉误差混进来。
+### 相对 FAST-LIVO2 的 LRU
 
-3. 激光加视觉（LIVO）
+FAST-LIVO2 的 VoxelMap 和视觉特征图会一直保留。这里两张图都按最近使用淘汰，长轨迹不会把内存一直堆上去。
 
-   - `visual/enable: true`
+激光地图，按根体素：
 
-   打开视觉后会强制 `use_voxel_map: true`，不能再退回 iVox。需要图像话题 `common/image_topics`，以及 `camera`、`vio` 里的内外参。相机模型编在 `src/vikit_common/`，目标名 `vikit_plugin`，不再单独作为 ROS 包，也不依赖 `vikit_ros`。视觉点的缓存大小由 `visual/lru_capacity` 和 `visual/max_points_per_voxel` 控制，写 `0` 表示不限制。每个视觉点最多保留 15 次观测。法向更新足够小且观测超过 7 次就标成收敛，不再继续堆观测。
+- 被访问的根体素挪到队头
+- 超过 `lio/lru_capacity` 就删掉最久没再用的整棵八叉树
+- Mid360 配置是 20000，写 `0` 不淘汰
+
+视觉特征，按 0.5 m 体素：
+
+- 上限是 `visual/lru_capacity`，Mid360 配置是 8000
+- 当前帧还在用的体素这一轮不删
+- 同一个体素里还有 `visual/max_points_per_voxel`，满了删最老、且不属于当前帧的点，写 `0` 不限制
 
 ### 动态物剔除
 
