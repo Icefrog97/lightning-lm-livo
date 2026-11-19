@@ -62,33 +62,125 @@ FAST-LIVO2 的 VoxelMap 和视觉特征图会一直保留。这里两张图都�
 
 ### 动态物剔除
 
-`dynamic_filter/enable: true` 时，点云去畸变之后、匹配之前，用图像检测结果把人、车等框掉。需要图像话题和相机内外参，可以和上面第 2 种纯激光 VoxelMap 一起开，不必打开 `visual/enable`。有 TensorRT 时走 YOLO；没有 TensorRT 时编一个空的检测器，纯激光照常编译、运行。被删掉的点可以发到 `/dynamic_filter/removed` 和 `/dynamic_filter/removed_body`。
+点云去畸变之后、匹配之前，用图像检测结果把人、车等框掉。
 
-仓库里的 `model/` 可以直接用，但不建议在自己的场景里完全沿用。需要换场景时，自己采集图像，用 [Ultralytics](https://github.com/ultralytics/ultralytics) 训练 YOLO，再导出成 TensorRT engine，把路径填到 launch 的模型参数里。有 CUDA 和 TensorRT 时，前处理在 GPU 上做 letterbox，推理用 CUDA Graph 录一次、之后每帧重放。Jetson 走另一份 TensorRT 8 的实现，由 `YOLO_TRT_JETSON` 选择。
+**开关**
+
+- `dynamic_filter/enable: true`
+- 需要图像话题和相机内外参
+- 可以和第 2 种纯激光 VoxelMap 一起开，`visual/enable` 保持 false
+
+**检测器**
+
+- 有 TensorRT 时走 YOLO
+- 没有 TensorRT 时编一个空检测器，纯激光照常编译、运行
+- 被删掉的点发到 `/dynamic_filter/removed` 和 `/dynamic_filter/removed_body`
+
+**模型**
+
+- `model/` 可以直接用，换场景时不建议完全沿用
+- 换场景：自己采集图像，用 [Ultralytics](https://github.com/ultralytics/ultralytics) 训练 YOLO，导出 TensorRT engine，路径填到 launch 的模型参数
+- 有 CUDA 和 TensorRT 时，前处理在 GPU 上做 letterbox，推理用 CUDA Graph 录一次，之后每帧重放
+- Jetson 走另一份 TensorRT 8 实现，由 `YOLO_TRT_JETSON` 选择
 
 ### 回环
 
-lightning-lm 按距离找历史关键帧，用 NDT 验证，再用 miao 做位姿图。这里换成 [STD](https://github.com/hku-mars/STD) 加 [GTSAM](https://github.com/borglab/gtsam) ISAM2。建图时 LIO 只把关键帧送进 `OnlineLoop`，描述子和图优化在单独线程里跑。每 `sub_frame_num` 帧点云合成一个子图，提三角形描述子再检索；跳过最近 `skip_near_num` 个子图，避免和刚走过的帧配上。检索到候选后用平面几何 ICP 修正相对位姿，再加 Between 因子。参数在 `config/config_loop.yaml`。`system/with_loop_closing` 为 true 时和建图一起开，优化后的点云写到源码包的 `PCD/`，同时写出 3D-BBS 用的体素地图。
+lightning-lm 按距离找历史关键帧，用 NDT 验证，再用 miao 做位姿图。这里换成 [STD](https://github.com/hku-mars/STD) 加 [GTSAM](https://github.com/borglab/gtsam) ISAM2。
 
-新关键帧相对上一帧的里程计边用上一帧优化后的位姿，不用优化前的 LIO 位姿。结束时打印每条回环边的平移残差（厘米）、旋转残差（度）和分数，以及均值、最大值。`use_height_factor` 是高度因子，默认打开：每来一个关键帧就加一条一元约束，把该帧的 z 拉向第一帧的高度，标准差 0.1 m，用来压住单层里的高度漂移。多楼层场景把它设为 false。
+**检索**
+
+- LIO 只把关键帧送进 `OnlineLoop`，描述子和图优化在单独线程
+- 每 `sub_frame_num` 帧合成一个子图，提三角形描述子再检索
+- 跳过最近 `skip_near_num` 个子图
+- 检索到候选后，用平面几何 ICP 修正相对位姿，再加 Between 因子
+- 参数在 `config/config_loop.yaml`
+- `system/with_loop_closing: true` 时和建图一起开
+- 优化后的点云写到源码包的 `PCD/`，同时写出 3D-BBS 用的体素地图
+
+**位姿边**
+
+- 新关键帧相对上一帧的里程计边，用上一帧优化后的位姿
+- 结束时打印每条回环边的平移残差（厘米）、旋转残差（度）、分数，以及均值和最大值
+
+**高度因子**
+
+- `use_height_factor` 默认打开
+- 每个关键帧加一条一元约束，把 z 拉向第一帧高度，标准差 0.1 m
+- 用来压住单层里的高度漂移
+- 多楼层设为 false
 
 ### 定位与 3D-BBS
 
-没有初值时用 [3D-BBS](https://github.com/KOKIAOKI/3d_bbs) 做全局搜索。`config/3dbbs.yaml` 的 `bbs_backend`：`auto` 是编进了 CUDA 并且机器上有显卡就用 GPU，否则用 CPU；`gpu` 是要求 GPU，没有设备时退回 CPU；`cpu` 是始终用 CPU。CPU 和 GPU 使用同一段高度范围 `bbs_min_z`、`bbs_max_z`，搜索时丢掉与这段高度不相交的分支。CMake 选项 `WITH_CUDA` 默认打开；找不到 CUDA 时整个工程仍然能编过，只是 3D-BBS 只有 CPU。定位时若不要 3D-BBS，把 `lidar_loc/use_3d_bbs` 设为 `false`。
+没有初值时用 [3D-BBS](https://github.com/KOKIAOKI/3d_bbs) 做全局搜索。
 
-`lidar_loc/bbs_timeout_msec` 大于 0 时，搜索到时间就停。0 表示不限时。定位可以读回环存下来的体素图；没有这份文件时，用当前加载的点云现算。
+**后端** `config/3dbbs.yaml` 的 `bbs_backend`
 
-进定位匹配前，当前帧先按 0.2 m 做体素降采样，再送进 NDT。初始化时先攒 3 帧拼成一帧，同样按 0.2 m 降采样，这个尺寸按 Mid360 取的。功能点或 3D-BBS 第一次没对上时，粗 NDT 的分辨率改成 2.0 m，再试一轮。`min_init_confidence` 不再减半，避免走廊里得分偏低时误初始化。连续匹配失败会计数，次数够了把状态打成 FAIL，再重置 LIO。`lidar_loc/add_recover_to_index` 为 true 时，启动把 `MAP` 里的恢复位姿加进功能点，当前配置是 false。动态图层更新前对点云做 z 向直通，下限 0.5 m，上限 `lidar_loc/filter_z_max`。
+- `auto`：编进了 CUDA 并且机器上有显卡就用 GPU，否则用 CPU
+- `gpu`：要求 GPU，没有设备时退回 CPU
+- `cpu`：始终用 CPU
+- CPU 和 GPU 共用 `bbs_min_z`、`bbs_max_z`，丢掉与这段高度不相交的分支
+- `WITH_CUDA` 默认打开；找不到 CUDA 时工程仍能编过，3D-BBS 只有 CPU
+- 不用 3D-BBS 时，把 `lidar_loc/use_3d_bbs` 设为 false
+
+**搜索时间**
+
+- `lidar_loc/bbs_timeout_msec` 大于 0：到时间就停
+- 等于 0：不限时
+- 可以读回环存下来的体素图；没有这份文件时，用当前加载的点云现算
+
+**匹配**
+
+- 进 NDT 前，当前帧按 0.2 m 降采样
+- 初始化先攒 3 帧拼成一帧，同样按 0.2 m 降采样，这个尺寸按 Mid360 取的
+- 功能点或 3D-BBS 第一次没对上时，粗 NDT 分辨率改成 2.0 m，再试一轮
+- `min_init_confidence` 不再减半，避免走廊里得分偏低时误初始化
+- 连续匹配失败会计数，次数够了把状态打成 FAIL，再重置 LIO
+- `lidar_loc/add_recover_to_index: true` 时，启动把 `MAP` 里的恢复位姿加进功能点；当前配置是 false
+- 动态图层更新前做 z 向直通：下限 0.5 m，上限 `lidar_loc/filter_z_max`
 
 ### 雷达、iVox 与调平
 
-`preprocess/lidar_type`：1 RoboSense，2 Velodyne，3 Ouster，4 Mid360 的 `PointCloud2`，5 Livox `CustomMsg`。建图和定位用同一个值。
+**雷达类型** `preprocess/lidar_type`，建图和定位用同一个值
 
-iVox 每个体素最多留 10 个点，满了删最旧的，避免小范围来回走时一个格子里的点越堆越多。格子总数上限是 `fasterlio/ivox_capacity`，近邻类型是 `fasterlio/ivox_nearby_type`（0、6、18、26）。IMU 初始化帧数是 `fasterlio/max_init_count`，默认 10。定位发散后会重置 LIO。
+- 1 RoboSense
+- 2 Velodyne
+- 3 Ouster
+- 4 Mid360 的 `PointCloud2`
+- 5 Livox `CustomMsg`
 
-退化检测只看平移信息矩阵 `H_tt` 的特征值，旋转块不抑制。开关是 `fasterlio/use_degeneracy`，比例是 `fasterlio/degeneracy_threshold_ratio`。这种做法只按特征值比例压平移，旋转和平移还耦合在一起。更精确的退化模型推荐 [DCReg](https://github.com/JokerJohn/DCReg)：用 Schur 补把旋转和平移的可观性拆开，再只对弱方向做处理。
+**iVox**
 
-雷达倾斜安装时用 `common/T_body_wrt_lio` 和 `common/E_body_wrt_lio` 调平。前者是平移，后者是 yaw、pitch、roll，单位是度，表示后轴中心相对 LIO/IMU 的位姿。发布的轨迹、点云和回环位姿都左乘它的逆。水平地面上可以用 `scripts/calc_imu_tilt.py` 估 pitch 和 roll。
+- 每个体素最多留 10 个点，满了删最旧的
+- 格子总数上限：`fasterlio/ivox_capacity`
+- 近邻类型：`fasterlio/ivox_nearby_type`（0、6、18、26）
+- IMU 初始化帧数：`fasterlio/max_init_count`，默认 10
+
+**重置**
+
+定位连续 10 帧激光匹配失败后，状态打成 FAIL，并重置定位、PGO 和 LIO。位姿回到最近一次还匹配得上时记下的恢复位姿，速度清零。IMU、雷达、图像缓冲清空，iVox 重建，VoxelMap 和视觉特征图清空，下一帧按首帧处理。
+
+`fasterlio/imu_reset_level`：
+
+- `1` 静止重置：重新等 `max_init_count` 帧，再估重力和陀螺零偏。车要停着
+- `2` 动态重置：沿用上一次静止初始化得到的重力和陀螺零偏，不再等待，车可以继续开
+- Mid360 配置是 `1`
+
+重置后 5 秒内，雷达帧间隔超过 0.5 秒只记一条宽限日志，不报断流。
+
+**退化**
+
+- 只看平移信息矩阵 `H_tt` 的特征值，旋转块不抑制
+- 开关：`fasterlio/use_degeneracy`
+- 比例：`fasterlio/degeneracy_threshold_ratio`
+- 这种做法按特征值比例压平移，旋转和平移还耦合在一起
+- 更精确的模型推荐 [DCReg](https://github.com/JokerJohn/DCReg)：用 Schur 补把旋转和平移的可观性拆开，再只对弱方向做处理
+
+**调平**
+
+- `common/T_body_wrt_lio`：平移
+- `common/E_body_wrt_lio`：yaw、pitch、roll，单位是度，表示后轴中心相对 LIO/IMU 的位姿
+- 发布的轨迹、点云和回环位姿都左乘它的逆
+- 水平地面上用 `scripts/calc_imu_tilt.py` 估 pitch 和 roll
 
 ## 编译
 
@@ -98,112 +190,106 @@ Ubuntu 22.04，ROS 2 Humble。
 
 ### 依赖
 
-- PCL
-- Eigen
-- Ceres
-- yaml-cpp
-- glog
-- geographiclib
-- opencv
-- gflags
-- pcl_conversions
-- OpenMP
-- CUDA（可选。没有 CUDA 时 3D-BBS 用 CPU，动态物剔除不走 TensorRT）
+- PCL、Eigen、Ceres、yaml-cpp、glog、geographiclib、OpenCV、gflags、pcl_conversions、OpenMP
+- CUDA 可选。没有 CUDA 时 3D-BBS 用 CPU，动态物剔除不走 TensorRT
 
+```bash
 sudo apt-get install libpcl-dev pcl-tools libyaml-cpp-dev ros-humble-pcl-conversions libfmt-dev
+```
 
-编译 Ceres
+**Ceres**
 
-​    cd 3rdparty/ceres
+```bash
+cd 3rdparty/ceres
+mkdir build && cd build
+cmake ..
+make -j6
+sudo make install
+```
 
-​    mkdir build
-​    cd build
+**GeographicLib**
 
-​    cmake ..
+```bash
+cd 3rdparty/geographiclib
+mkdir build && cd build
+cmake ..
+make -j6
+sudo make install
+```
 
-​    make -j6
-
-​    sudo make install
-
-编译 geographiclib
-
-​    cd 3rdparty/geographiclib
-
-​    mkdir build
-
-​    cd build
-
-​    cmake ..
-
-​    make -j6
-
-​    sudo make install
-
-编译 gtsam
-
-​    cd 3rdparty/gtsam-4.2.0
-
-​    mkdir build
-
-​    cd build
-
-​    cmake ..
-
-​    make -j6
-
-​    sudo make install
+**GTSAM**
 
 GTSAM 要对着系统里的 Eigen 编译。Ubuntu 22.04 的系统 Eigen 是 3.4。`3rdparty/gtsam-4.2.0/cmake/HandleEigen.cmake` 里 `GTSAM_USE_SYSTEM_EIGEN` 默认已经是 ON。如果以前用别的 Eigen 装过 GTSAM，先把 `build` 目录删掉再 cmake，否则会沿用旧的缓存。
 
-编译 opencv
+```bash
+cd 3rdparty/gtsam-4.2.0
+mkdir build && cd build
+cmake ..
+make -j6
+sudo make install
+```
+
+**OpenCV 4.2.0**
 
 工程不用系统自带的 OpenCV。系统里一般是 4.5，这个工程的 CMakeLists 指定要 4.2.0，并且只到下面这个目录里找：
 
-​    $HOME/deps/opencv-4.2.0-install
+`$HOME/deps/opencv-4.2.0-install`
 
-`$HOME` 是当前用户的主目录。用户名是 `abc` 时，这个路径就是 `/home/abc/deps/opencv-4.2.0-install`。下面的 `CMAKE_INSTALL_PREFIX` 就是在告诉 OpenCV：编译完成后，头文件和库安装到这个文件夹，不要装进 `/usr`。装完之后，这个目录里会有 `lib/cmake/opencv4`，工程靠它找到 `libopencv_core.so.4.2`。目录名和 CMakeLists 里写的不一致时，运行会报找不到 `libopencv_core.so.4.2`。
+`$HOME` 是当前用户的主目录。用户名是 `abc` 时，这个路径就是 `/home/abc/deps/opencv-4.2.0-install`。`CMAKE_INSTALL_PREFIX` 是告诉 OpenCV：头文件和库安装到这个文件夹。装完之后，这个目录里会有 `lib/cmake/opencv4`，工程靠它找到 `libopencv_core.so.4.2`。目录名和 CMakeLists 里写的不一致时，运行会报找不到 `libopencv_core.so.4.2`。
 
-​    cd 3rdparty/opencv-4.2.0
+`make install` 不要加 sudo。`$HOME/deps` 在自己的主目录下，用 sudo 会把库装进 root 的家目录。
 
-​    mkdir build
-​    cd build
+```bash
+cd 3rdparty/opencv-4.2.0
+mkdir build && cd build
+cmake -D CMAKE_INSTALL_PREFIX=$HOME/deps/opencv-4.2.0-install ..
+make -j6
+make install
+```
 
-​    cmake -D CMAKE_INSTALL_PREFIX=$HOME/deps/opencv-4.2.0-install ..
+**vikit 与 CUDA**
 
-​    make -j6
+- vikit 编在 `src/vikit_common/`，目标 `vikit_plugin`
+- CUDA 自己装。不装也能编译，3D-BBS 走 CPU
+- 装了 CUDA 但不想编 GPU 库时，在下面的 colcon 命令里加上 `-DWITH_CUDA=OFF`
 
-​    make install
-
-这里不要加 sudo。`$HOME/deps` 在自己的主目录下，用 sudo 会把库装成 root 的家目录。
-
-vikit 编在 `src/vikit_common/`，目标 `vikit_plugin`，不依赖单独的 `vikit_ros`。
-
-CUDA 自己装。不装也能编译：3D-BBS 走 CPU。装了 CUDA 但不想编 GPU 库时，在下面的 colcon 命令里加上 `-DWITH_CUDA=OFF`。
-
-### 编译
+### 编译工程
 
 在工作空间根目录执行。这个仓库的工作空间根目录是源码包的上一级，例如 `/home/abc/lyx/lightning-lm2`，不是 `src/lightning-lm2`。在源码包里面执行的话，`log/` 和 `install/` 会写进源码目录。
 
-​    source /opt/ros/humble/setup.bash
-
-​    MAKEFLAGS="-j4" colcon build --packages-select lightning --cmake-args -DCMAKE_BUILD_TYPE=Release
-
-​    source install/setup.bash
-
 `MAKEFLAGS="-j4"` 是编译时最多 4 个线程。
 
-### 流程：
+```bash
+source /opt/ros/humble/setup.bash
+MAKEFLAGS="-j4" colcon build --packages-select lightning --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
+```
 
-1. 实时建图: ros2 launch lightning mapping.launch.py
+### 运行
 
-   - 在线回环与 LIO 同时运行，在源码包的 PCD/ 下生成 pcd 格式点云，将 global_loop_map.pcd 放到 MAP 下作为 localization 的静态地图，MAP/VoxelMap/ 作为 3d-bbs 的先验体素地图。
-   - 将新的 MAP 下点云及 MAP/VoxelMap 重命名为同名文件并写入 yaml 中的 system/global_loop_map_name，否则下次运行将被覆盖。
-2. 实时定位: ros2 launch lightning localization.launch.py
+**1. 实时建图**
+
+```bash
+ros2 launch lightning mapping.launch.py
+```
+
+- 在线回环与 LIO 同时运行
+- 在源码包的 `PCD/` 下生成 pcd
+- 把 `global_loop_map.pcd` 放到 `MAP/` 下，作为定位的静态地图
+- `MAP/VoxelMap/` 作为 3D-BBS 的先验体素地图
+- 把新的 `MAP` 下点云和 `MAP/VoxelMap` 重命名为同名文件，并写入 yaml 的 `system/global_loop_map_name`，否则下次运行会被覆盖
+
+**2. 实时定位**
+
+```bash
+ros2 launch lightning localization.launch.py
+```
 
 ## 辅助脚本
 
-脚本的参数说明和使用流程详见 [`scripts/README.md`](scripts/README.md)：
+参数说明和使用流程见 [`scripts/README.md`](scripts/README.md)。
 
-- `calc_imu_tilt.py`
-  - **什么时候做：**设备首次安装，或 IMU/雷达安装位置发生调整后，在水平地面静止录制一段 IMU 数据时使用；
-  - **为什么做：**估计传感器相对地面的 Roll/Pitch，写入 `common/E_body_wrt_lio`，避免安装倾角把地图建斜。
+**`calc_imu_tilt.py`**
+
+- 什么时候做：设备首次安装，或 IMU/雷达安装位置调整后，在水平地面静止录一段 IMU
+- 为什么做：估计传感器相对地面的 roll、pitch，写入 `common/E_body_wrt_lio`，避免安装倾角把地图建斜
