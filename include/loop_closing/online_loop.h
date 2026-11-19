@@ -33,7 +33,7 @@ public:
     struct Options
     {
         STDesc::ConfigSetting stdesc;
-        bool use_height_factor = false;
+        bool use_height_factor = true;
         double filter_size_map = 0.2;
         double filter_size_src = 0.2;
         int point_filter_num = 5;
@@ -94,7 +94,7 @@ private:
 
     int sub_frame_num_{10};
     int skip_near_num_{10};
-    bool use_height_factor_{false};
+    bool use_height_factor_{true};
     bool use_enu_results_{true};
     double filter_size_map_{0.2};
     double pgo_update_warn_sec_{1.0};

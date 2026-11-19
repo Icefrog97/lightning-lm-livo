@@ -46,13 +46,13 @@ lightning-lm 的纯激光地图是 iVox。这里另外接了 FAST-LIVO2 的 Voxe
 
 `dynamic_filter/enable: true` 时，点云去畸变之后、匹配之前，用图像检测结果把人、车等框掉。需要图像话题和相机内外参，可以和上面第 2 种纯激光 VoxelMap 一起开，不必打开 `visual/enable`。有 TensorRT 时走 YOLO；没有 TensorRT 时编一个空的检测器，纯激光照常编译、运行。被删掉的点可以发到 `/dynamic_filter/removed` 和 `/dynamic_filter/removed_body`。
 
-仓库里的 `model/` 只是示例，不能直接当正式模型用。需要自己采集图像，用 [Ultralytics](https://github.com/ultralytics/ultralytics) 训练 YOLO，再导出成 TensorRT engine，把路径填到 launch 的模型参数里。有 CUDA 和 TensorRT 时，前处理在 GPU 上做 letterbox，推理用 CUDA Graph 录一次、之后每帧重放。Jetson 走另一份 TensorRT 8 的实现，由 `YOLO_TRT_JETSON` 选择。
+仓库里的 `model/` 可以直接用，但不建议在自己的场景里完全沿用。需要换场景时，自己采集图像，用 [Ultralytics](https://github.com/ultralytics/ultralytics) 训练 YOLO，再导出成 TensorRT engine，把路径填到 launch 的模型参数里。有 CUDA 和 TensorRT 时，前处理在 GPU 上做 letterbox，推理用 CUDA Graph 录一次、之后每帧重放。Jetson 走另一份 TensorRT 8 的实现，由 `YOLO_TRT_JETSON` 选择。
 
 ### 回环
 
 lightning-lm 按距离找历史关键帧，用 NDT 验证，再用 miao 做位姿图。这里换成 [STD](https://github.com/hku-mars/STD) 加 [GTSAM](https://github.com/borglab/gtsam) ISAM2。建图时 LIO 只把关键帧送进 `OnlineLoop`，描述子和图优化在单独线程里跑。每 `sub_frame_num` 帧点云合成一个子图，提三角形描述子再检索；跳过最近 `skip_near_num` 个子图，避免和刚走过的帧配上。检索到候选后用平面几何 ICP 修正相对位姿，再加 Between 因子。参数在 `config/config_loop.yaml`。`system/with_loop_closing` 为 true 时和建图一起开，优化后的点云写到源码包的 `PCD/`，同时写出 3D-BBS 用的体素地图。
 
-新关键帧相对上一帧的里程计边用上一帧优化后的位姿，不用优化前的 LIO 位姿。结束时打印每条回环边的平移残差（厘米）、旋转残差（度）和分数，以及均值、最大值。`use_height_factor` 默认关，多楼层不要开。
+新关键帧相对上一帧的里程计边用上一帧优化后的位姿，不用优化前的 LIO 位姿。结束时打印每条回环边的平移残差（厘米）、旋转残差（度）和分数，以及均值、最大值。`use_height_factor` 是高度因子，默认打开：每来一个关键帧就加一条一元约束，把该帧的 z 拉向第一帧的高度，标准差 0.1 m，用来压住单层里的高度漂移。多楼层场景把它设为 false。
 
 ### 定位与 3D-BBS
 

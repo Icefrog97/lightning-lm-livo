@@ -1,4 +1,4 @@
-use_height_factor: false
+use_height_factor: true  # 高度因子：每个关键帧的 z 约束到第一帧高度。多楼层设为 false
 point_filter_num: 5                               # lidar 跳点 step
 
 loop:

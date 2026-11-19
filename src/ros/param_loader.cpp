@@ -388,7 +388,7 @@ void LoadLaserMappingConfig(const rclcpp::Node::SharedPtr &nh, LaserMapping::Con
 void LoadOnlineLoop(const rclcpp::Node::SharedPtr &nh, OnlineLoop::Options &opt)
 {
     LoadStdesc(nh, opt.stdesc);
-    opt.use_height_factor = Param<bool>(nh, "use_height_factor", false);
+    opt.use_height_factor = Param<bool>(nh, "use_height_factor", true);
     opt.filter_size_map = Param<double>(nh, "map/filter_size_map", 0.2);
     opt.filter_size_src = Param<double>(nh, "map/filter_size_src", 0.2);
     opt.point_filter_num = Param<int>(nh, "point_filter_num", 5);
