@@ -1,0 +1,54 @@
+use_height_factor: false
+point_filter_num: 5                               # lidar 跳点 step
+
+loop:
+    update_graph_freq: 1  #更新地图频率(若出现[Pgo Update Time]警告，可适当调小)
+    pub_pgo_map_en: false  # false: 输入空闲 1s 发一次 /pgo_map（旧逻辑）；true: 每次 ISAM 发体素化 /pgo_map
+    use_key_frame: true  #使用关键帧
+    key_frame_len_thre: 1.0  # 相邻关键帧最小位移（米）。0.2 会几乎每帧都进图；车载建议 1.0～2.0
+    key_frame_ang_thre: 0.2  # 相邻关键帧最小转角（弧度）。2 rad≈114°，几乎只靠位移抽帧
+    key_frame_time_thre: 2.0  # 距离和转角都未触发时，超过该秒数强制收一帧。0 关闭
+    odom_rot_sigma_deg: 0.2  # 相邻关键帧旋转因子标准差（度）
+    odom_trans_sigma: 0.03   # 相邻关键帧平移因子标准差（米），3 cm
+
+map:
+    filter_size_map: 0.2  # 存储地图的滤波体素大小
+    filter_size_src: 0.2 #0.2 #源点云滤波体素大小
+
+system:
+  omp_nums: 8
+
+# pre process
+ds_size: 0.2 #0.2#地图存取降采样率
+maximum_corner_num: 150  #150 每组取角点的最大数量（性能不好适当调小） # 从一帧点云中提取的角点（特征点）的最大数量限制。限制数量可以控制后续描述子计算和匹配的复杂度。
+
+# key points
+plane_detection_thre: 0.01
+plane_merge_normal_thre: 0.1
+plane_merge_dis_thre: 0.3
+voxel_size: 2  #取特征点依赖的体素大小
+voxel_init_num: 10
+proj_image_resolution: 0.3 #0.5 #将平面点聚合成像素分辨率
+proj_dis_min: 0
+proj_dis_max: 2
+corner_thre: 5  # 15 取角点的阈值
+
+# std descriptor
+descriptor_near_num: 30 #30  #每个角点搜索构造std三角形的邻近点数 # 为每个候选角点构建描述子时，在其周围搜索的最近邻点的数量。更多的点能提供更丰富的几何上下文信息，
+descriptor_min_len: 1   # 构成描述子的三角形三条边的最小长度限制（单位：米）。过滤掉过小的、可能不稳定的三角形。
+descriptor_max_len: 50  # 构成描述子的三角形三条边的最大长度限制（单位：米）。过滤掉过大的、可能缺乏区分度的三角形。
+non_max_suppression_radius: 0.5  # 描述子非极大值抑制（NMS）的半径（单位：米）。在指定空间范围内只保留最显著的描述子，以避免在邻近区域产生大量重复的、相似的描述子。
+std_side_resolution: 0.2  # STD描述子三维网格化时的体素大小（单位：米）。用于对描述子进行编码和哈希，影响描述子匹配的速度和精度。
+
+# candidate search
+skip_near_num: 10    # 忽略最近连续多少帧的回环帧，不与它们进行回环检测。防止与很近的（几乎是同一位置的）帧产生误匹配。
+candidate_num: 100   #50 回环检测的备选相似的数据的组数（性能不好适当调小）  # 在进行回环验证（几何验证、ICP）之前，从数据库中检索出的最相似的候选帧的数量。增大此值可能提高回环召回率（找到真正的回环），但会显著增加计算量。性能瓶颈时优先调小。
+sub_frame_num: 10 # 5  #每几帧做成一个小帧计算std特征子   # 将多少帧激光雷达数据累积成一个“关键帧”或“子地图”用于生成STD描述子。累积更多的帧可以增加描述子的丰富度和稳定性，但会降低回环检测的粒度。
+vertex_diff_threshold: 0.5  # 顶点特征筛选阈值
+rough_dis_threshold: 0.5  # 边长筛选阈值
+normal_threshold: 0.5     # 法向量夹角的阈值
+dis_threshold: 0.5 #0.5   # 距离的阈值。在候选验证阶段：检查变换后的三角形顶点与目标顶点的距离。在平面验证阶段：检查点到对应平面的垂直距离
+icp_threshold: 0.3 #0.3  #回环判定阈值(计算方法：就是匹配成功的点数占总点数的比值)
+center_dis_threshold: 25   # 回环检测中考虑候选帧的最大距离阈值（单位：米）。当前帧与候选关键帧之间的欧氏距离超过此值，则直接忽略该候选，不考虑其为回环。用于减少不必要的计算。
+
+map_resolution: 0.2

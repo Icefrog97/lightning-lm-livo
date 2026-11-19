@@ -1,0 +1,5 @@
+Origin Pose:
+Lat, Lon, Alt:  [40.00000, 116.00000, 20.00000]
+Orientation(x, y, z, w):  [-0.0000, -0.0000, 1.0000, 0.0000]
+Eular_Angle(row, pitch, yaw):  [0.00000, 0.0000, 180.0000]
+

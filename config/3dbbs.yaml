@@ -1,0 +1,41 @@
+## 3D-BBS parameters for lidar_loc
+# auto: 编进了 CUDA 且有设备就用 GPU，否则 CPU
+# gpu: 要求 GPU，没有设备时告警并退回 CPU
+# cpu: 始终 CPU
+bbs_backend: auto
+
+bbs_min_level_res: 2 # [m], e.g. outdoor: 1.0, indoor: 0.5
+bbs_max_level: 5
+
+## Angular search range [rad]
+# 6.28 input is converted to 2*M_PI
+bbs_min_rpy: [-0.02,-0.02,0.0] # [roll, pitch, yaw]
+bbs_max_rpy: [0.02,0.02,6.28] # [roll, pitch, yaw]
+
+## Score threshold
+# score_threshold = floor(src_points.size() * score_threshold_percentage)
+bbs_score_threshold_percentage: 0.7
+
+################[Optional]################
+## Downsample target clouds [m]
+bbs_map_leaf_size: 0.2 # off: 0.0
+
+## Downsample source clouds [m]
+bbs_src_leaf_size: 2 # off: 0.0
+
+## Crop source clouds [m]
+bbs_min_scan_range: 0.0 # [m]
+bbs_max_scan_range: 30.0 # [m]
+# 传感器原点在地图坐标系的高度带 [m]。没 RTK 的全局初始化只在这个高度里分支。
+# max <= min 时关闭，退回整张地图的 Z 包围盒。
+bbs_min_z: 0.0
+bbs_max_z: 1.0
+# off: set 0.0 to both min_scan_range and max_scan_range
+
+## Timeout [msec]
+# Enter the number as int
+bbs_timeout_msec: 40000 # off: 0
+ 
+## Final align (evaluate the error)
+bbs_use_gicp: false
+bbs_use_voxelmap_coord: true

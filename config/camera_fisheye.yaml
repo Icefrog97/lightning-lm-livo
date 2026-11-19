@@ -1,0 +1,27 @@
+# FAST-LIVO2-style fisheye/equidistant camera configuration.
+# LaserMapping exports these parameters to vikit camera_loader; FAST VIOManager
+# loads the native vk::EquidistantCamera model.
+
+cam_model: EquidistantCamera
+cam_width: 1920
+cam_height: 1080
+scale: 0.5
+
+cam_fx: 1003.4005970360431
+cam_fy: 1002.1972683018585
+cam_cx: 980.3710962930505
+cam_cy: 512.357123730749
+
+# Equidistant/fisheye distortion: k1, k2, k3, k4
+k1: -0.0725668882263964
+k2: 0.004383186141105851
+k3: -0.013545770129002526
+k4: 0.003946809677621375
+
+# Extra undistort parameters requested for downstream/debug undistortion.
+# They are exported into the same vikit camera namespace as the FAST-LIVO2
+# camera parameters. Native VIO projection still uses vk::EquidistantCamera.
+undistort_scale_x: 0.9
+undistort_scale_y: 0.9
+undistort_shift_x: 0.0
+undistort_shift_y: 0.0

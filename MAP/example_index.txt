@@ -1,0 +1,4 @@
+0 0 0 /home/abc/src/lightning-lm2/MAP/mypcd.pcd
+# functional points
+origin1 50.8388 -9.861 -1.72343 0 0 0 1
+origin2 50.8388 -19.861 -1.72343 0 0 0 1
