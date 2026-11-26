@@ -1,89 +1,91 @@
-## 使用说明：
+[中文](README.zh-CN.md)
 
-本仓库在 [lightning-lm](https://github.com/gaoxiang12/lightning-lm) 的激光建图与定位上继续开发。前端仍是 FasterLIO / ESKF，定位仍是激光匹配加 PGO。
+## Usage
 
-用到的项目：
+This repository continues development on the lidar mapping and localization of [lightning-lm](https://github.com/gaoxiang12/lightning-lm). The frontend is still FasterLIO / ESKF, and localization is still lidar matching plus PGO.
 
-- [lightning-lm](https://github.com/gaoxiang12/lightning-lm)：激光建图、定位和 iVox 前端
-- [FAST-LIVO2](https://github.com/hku-mars/FAST-LIVO2)：VoxelMap 和视觉里程计
-- [STD](https://github.com/hku-mars/STD)：回环用的三角形描述子
-- [3D-BBS](https://github.com/KOKIAOKI/3d_bbs)：定位全局初始化
-- [GTSAM](https://github.com/borglab/gtsam)：回环位姿图，用的是 ISAM2
-- [rpg_vikit](https://github.com/uzh-rpg/rpg_vikit)：相机模型，源码在 `src/vikit_common/`
-- [Ultralytics](https://github.com/ultralytics/ultralytics)：动态物检测模型的训练
+Projects used:
+
+- [lightning-lm](https://github.com/gaoxiang12/lightning-lm): lidar mapping, localization, and the iVox frontend
+- [FAST-LIVO2](https://github.com/hku-mars/FAST-LIVO2): VoxelMap and visual odometry
+- [STD](https://github.com/hku-mars/STD): triangle descriptors for loop closure
+- [3D-BBS](https://github.com/KOKIAOKI/3d_bbs): global initialization for localization
+- [GTSAM](https://github.com/borglab/gtsam): loop-closure pose graph, using ISAM2
+- [rpg_vikit](https://github.com/uzh-rpg/rpg_vikit): camera models; source is in `src/vikit_common/`
+- [Ultralytics](https://github.com/ultralytics/ultralytics): training the dynamic-object detection model
 - [Ceres](https://github.com/ceres-solver/ceres-solver)
 
-### 1. 建图前端可以三选一
+### 1. The mapping frontend can be one of three
 
-lightning-lm 的纯激光地图是 iVox。这里另外接了 FAST-LIVO2 的 VoxelMap。VoxelMap 可以单独当纯激光用。
+The pure-lidar map in lightning-lm is iVox. VoxelMap from FAST-LIVO2 is also connected here. VoxelMap can be used on its own as pure lidar.
 
-### 2. 相对 FAST-LIVO2 的 LRU
+### 2. LRU relative to FAST-LIVO2
 
-FAST-LIVO2 的 VoxelMap 和视觉特征图会一直保留。这里两张图都按最近使用淘汰，长轨迹不会把内存一直堆上去。
+FAST-LIVO2 keeps its VoxelMap and visual feature map indefinitely. Here both maps evict by least recently used, so a long trajectory does not keep stacking memory.
 
-### 3. 动态物剔除
+### 3. Dynamic object removal
 
-点云去畸变之后、匹配之前，用图像检测结果把人、车等框掉。
+After point-cloud undistortion and before matching, image detections are used to mask out people, vehicles, and similar objects.
 
-**检测器**
+**Detector**
 
-- 有 TensorRT 时走 YOLO
-- 没有 TensorRT 时编一个空检测器，纯激光照常编译、运行
-- 被删掉的点发到 `/dynamic_filter/removed` 和 `/dynamic_filter/removed_body`
+- Use YOLO when TensorRT is available
+- Without TensorRT, build an empty detector; pure lidar still compiles and runs
+- Removed points are published to `/dynamic_filter/removed` and `/dynamic_filter/removed_body`
 
-**模型**
+**Model**
 
-- `model/` 可以直接用，换场景时不建议完全沿用
-- 换场景：自己采集图像，用 [Ultralytics](https://github.com/ultralytics/ultralytics) 训练 YOLO，导出 TensorRT engine，路径填到 launch 的模型参数
+- `model/` can be used directly; fully reusing it on a new scene is not recommended
+- New scene: collect your own images, train YOLO with [Ultralytics](https://github.com/ultralytics/ultralytics), export a TensorRT engine, and fill the path into the model parameter of the launch file
 
-### 4. 回环
+### 4. Loop closure
 
-lightning-lm 按距离找历史关键帧，用 NDT 验证，再用 miao 做位姿图。这里换成 [STD](https://github.com/hku-mars/STD) 加 [GTSAM](https://github.com/borglab/gtsam) ISAM2。
+lightning-lm finds historical keyframes by distance, verifies them with NDT, then builds the pose graph with miao. This is replaced by [STD](https://github.com/hku-mars/STD) plus [GTSAM](https://github.com/borglab/gtsam) ISAM2.
 
-**高度因子**
+**Height factor**
 
-- `use_height_factor` 默认打开
-- 每个关键帧加一条一元约束，把 z 拉向第一帧高度，标准差 0.1 m
-- 用来压住单层里的高度漂移
+- `use_height_factor` is on by default
+- Each keyframe adds a unary constraint that pulls z toward the first-frame height, with a standard deviation of 0.1 m
+- Used to suppress height drift within a single floor
 
-### 5. 重定位
+### 5. Relocalization
 
-没有初值时用 [3D-BBS](https://github.com/KOKIAOKI/3d_bbs) 做全局搜索。
+When there is no initial guess, [3D-BBS](https://github.com/KOKIAOKI/3d_bbs) does a global search.
 
-### 6. 重置
+### 6. Reset
 
-定位连续 10 帧激光匹配失败后，状态打成 FAIL，并重置定位、PGO 和 LIO。位姿回到最近一次还匹配得上时记下的恢复位姿，速度清零。IMU、雷达、图像缓冲清空，iVox 重建，VoxelMap 和视觉特征图清空，下一帧按首帧处理。
+After localization fails lidar matching for 10 consecutive frames, the state is set to FAIL, and localization, PGO, and LIO are reset. The pose returns to the recovery pose recorded at the last time matching still succeeded, and velocity is cleared. IMU, lidar, and image buffers are cleared, iVox is rebuilt, VoxelMap and the visual feature map are cleared, and the next frame is treated as the first frame.
 
-### 7. 退化
+### 7. Degeneracy
 
-- 只看平移信息矩阵 `H_tt` 的特征值，旋转块不抑制
-- 开关：`fasterlio/use_degeneracy`
-- 比例：`fasterlio/degeneracy_threshold_ratio`
-- 这种做法按特征值比例压平移，旋转和平移还耦合在一起
-- 更精确的模型推荐 [DCReg](https://github.com/JokerJohn/DCReg)：用 Schur 补把旋转和平移的可观性拆开，再只对弱方向做处理
+- Only the eigenvalues of the translational information matrix `H_tt` are considered; the rotation block is not suppressed
+- Switch: `fasterlio/use_degeneracy`
+- Ratio: `fasterlio/degeneracy_threshold_ratio`
+- This approach suppresses translation by the eigenvalue ratio; rotation and translation remain coupled
+- For a more accurate model, [DCReg](https://github.com/JokerJohn/DCReg) is recommended: use the Schur complement to separate the observability of rotation and translation, then handle only the weak directions
 
-### 8. 调平
+### 8. Leveling
 
-雷达斜着安装时，用它把轨迹和点云拉平。
+When the lidar is mounted at an angle, this pulls the trajectory and point cloud level.
 
-- `common/T_body_wrt_lio`：平移
-- `common/E_body_wrt_lio`：yaw、pitch、roll，单位是度，表示后轴中心相对 LIO/IMU 的位姿
-- 发布的轨迹、点云和回环位姿都左乘它的逆
-- 水平地面上用 `scripts/calc_imu_tilt.py` 估 pitch 和 roll
+- `common/T_body_wrt_lio`: translation
+- `common/E_body_wrt_lio`: yaw, pitch, roll, in degrees; the pose of the rear-axle center relative to LIO/IMU
+- Published trajectories, point clouds, and loop-closure poses are all left-multiplied by its inverse
+- On level ground, use `scripts/calc_imu_tilt.py` to estimate pitch and roll
 
-## 编译
+## Build
 
-### 环境
+### Environment
 
-Ubuntu 22.04，ROS 2 Humble。
+Ubuntu 22.04, ROS 2 Humble.
 
-### 依赖
+### Dependencies
 
-1. 将 MAP/ 下的 example_* 复制并重命名为 *。
-2. 安装依赖
+1. Copy the example_* under MAP/ and rename them to *.
+2. Install dependencies
 
-- PCL、Eigen、Ceres、yaml-cpp、glog、geographiclib、OpenCV、gflags、pcl_conversions、OpenMP
-- CUDA 可选。没有 CUDA 时 3D-BBS 用 CPU，动态物剔除不走 TensorRT
+- PCL, Eigen, Ceres, yaml-cpp, glog, geographiclib, OpenCV, gflags, pcl_conversions, OpenMP
+- CUDA is optional. Without CUDA, 3D-BBS uses the CPU, and dynamic-object removal does not use TensorRT
 
 ```bash
 sudo apt-get install libpcl-dev pcl-tools libyaml-cpp-dev ros-humble-pcl-conversions libfmt-dev
@@ -111,7 +113,7 @@ sudo make install
 
 **GTSAM**
 
-GTSAM 要对着系统里的 Eigen 编译。Ubuntu 22.04 的系统 Eigen 是 3.4。`3rdparty/gtsam-4.2.0/cmake/HandleEigen.cmake` 里 `GTSAM_USE_SYSTEM_EIGEN` 默认已经是 ON。如果以前用别的 Eigen 装过 GTSAM，先把 `build` 目录删掉再 cmake，否则会沿用旧的缓存。
+GTSAM must be compiled against the system Eigen. The system Eigen on Ubuntu 22.04 is 3.4. In `3rdparty/gtsam-4.2.0/cmake/HandleEigen.cmake`, `GTSAM_USE_SYSTEM_EIGEN` is already ON by default. If GTSAM was previously installed against a different Eigen, delete the `build` directory before cmake, otherwise the old cache will be reused.
 
 ```bash
 cd 3rdparty/gtsam-4.2.0
@@ -123,13 +125,13 @@ sudo make install
 
 **OpenCV 4.2.0**
 
-工程不用系统自带的 OpenCV。系统里一般是 4.5，这个工程的 CMakeLists 指定要 4.2.0，并且只到下面这个目录里找：
+The project does not use the system OpenCV. The system usually has 4.5. This project's CMakeLists requires 4.2.0 and looks only in the following directory:
 
 `$HOME/deps/opencv-4.2.0-install`
 
-`$HOME` 是当前用户的主目录。用户名是 `abc` 时，这个路径就是 `/home/abc/deps/opencv-4.2.0-install`。`CMAKE_INSTALL_PREFIX` 是告诉 OpenCV：头文件和库安装到这个文件夹。装完之后，这个目录里会有 `lib/cmake/opencv4`，工程靠它找到 `libopencv_core.so.4.2`。目录名和 CMakeLists 里写的不一致时，运行会报找不到 `libopencv_core.so.4.2`。
+`$HOME` is the current user's home directory. When the username is `abc`, this path is `/home/abc/deps/opencv-4.2.0-install`. `CMAKE_INSTALL_PREFIX` tells OpenCV to install headers and libraries into this folder. After installation, this directory contains `lib/cmake/opencv4`, which the project uses to find `libopencv_core.so.4.2`. If the directory name does not match what is written in CMakeLists, the run will report that `libopencv_core.so.4.2` cannot be found.
 
-`make install` 不要加 sudo。`$HOME/deps` 在自己的主目录下，用 sudo 会把库装进 root 的家目录。
+Do not add sudo to `make install`. `$HOME/deps` is under your own home directory; using sudo installs the libraries into root's home directory.
 
 ```bash
 cd 3rdparty/opencv-4.2.0
@@ -139,43 +141,43 @@ make -j6
 make install
 ```
 
-**vikit 与 CUDA**
+**vikit and CUDA**
 
-- vikit 编在 `src/vikit_common/`，目标 `vikit_plugin`
-- CUDA >= 12.0 自己装。不装也能编译，3D-BBS 走 CPU
+- vikit is built in `src/vikit_common/`, target `vikit_plugin`
+- Install CUDA >= 12.0 yourself. It still compiles without it; 3D-BBS uses the CPU
 
-### 编译工程
+### Build the project
 
 ```bash
 colcon build
 source install/setup.bash
 ```
 
-### 运行
+### Run
 
-**1. 实时建图**
+**1. Real-time mapping**
 
 ```bash
 ros2 launch lightning mapping.launch.py
 ```
 
-- 在线回环与 LIO 同时运行
-- 在源码包的 `PCD/` 下生成 pcd
-- 把 `global_loop_map.pcd` 放到 `MAP/` 下，作为定位的静态地图
-- `MAP/VoxelMap/` 作为 3D-BBS 的先验体素地图
-- 把新的 `MAP` 下点云和 `MAP/VoxelMap` 重命名为同名文件，并写入 yaml 的 `system/global_loop_map_name`，否则下次运行会被覆盖
+- Online loop closure runs together with LIO
+- Generates pcd under `PCD/` of the source package
+- Put `global_loop_map.pcd` under `MAP/` as the static map for localization
+- `MAP/VoxelMap/` is the prior voxel map for 3D-BBS
+- Rename the point clouds under the new `MAP` and `MAP/VoxelMap` to the same filenames, and write them into `system/global_loop_map_name` in the yaml; otherwise they will be overwritten the next time it runs
 
-**2. 实时定位**
+**2. Real-time localization**
 
 ```bash
 ros2 launch lightning localization.launch.py
 ```
 
-## 辅助脚本
+## Helper scripts
 
-参数说明和使用流程见 [`scripts/README.md`](scripts/README.md)。
+Parameter descriptions and the usage flow are in [`scripts/README.md`](scripts/README.md).
 
 **`calc_imu_tilt.py`**
 
-- 什么时候做：设备首次安装，或 IMU/雷达安装位置调整后，在水平地面静止录一段 IMU
-- 为什么做：估计传感器相对地面的 roll、pitch，写入 `common/E_body_wrt_lio`，避免安装倾角把地图建斜
+- When: on first installation of the device, or after the IMU/lidar mounting position is adjusted, record a segment of IMU while stationary on level ground
+- Why: estimate the sensor's roll and pitch relative to the ground, write them into `common/E_body_wrt_lio`, and avoid the mounting tilt skewing the map
